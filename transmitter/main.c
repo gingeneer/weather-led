@@ -205,7 +205,7 @@ void i2c_init(void)
 	  UCB0CTLW0 |= UCMODE_3 | UCMST | UCSYNC;   // I2C mode, Master mode, sync
 
 	  UCB0BRW = 24;                         // baudrate = SMCLK / 8
-	  UCB0I2CSA = LIGHT_SENSOR_ADDRESS;               // Slave address
+	  UCB0I2CSA = TEMP_SENSOR_ADDRESS;               // Slave address
 	  UCB0TBCNT = 0x0002;                       // number of bytes to be received	//TODO
 	  UCB0CTL1 &= ~UCSWRST;
 
@@ -244,10 +244,10 @@ int readData() {
 	UCB0CTL1 |= UCTXSTT;  // I2C start condition
 
 	while(!(UCB0IFG & UCRXIFG));
-	t |= UCB0RXBUF;				//read low byte
+	t |= UCB0RXBUF << 8;				//read low byte
 
 	while(!(UCB0IFG & UCRXIFG));
-	t = UCB0RXBUF << 8;			//read high byte
+	t |= UCB0RXBUF;			//read high byte
 
 	// Send stop condition
 	UCB0CTLW0 |= UCTXSTP;
@@ -261,13 +261,13 @@ int getTemperature() {
 	i2c_writeByte(CMD_GET_TEMPERATURE);
 
 	int t = readData();
-	t = (t >> 2)/32;
-
+	//t = (t >> 2)/32;
+	//t = -46.85 + 175.72 * (t/65536);
 	return t;
 }
 
 void initLight(){
-	eI2C_setMode(__MSP430_BASEADDRESS_EUSCI_B0__, eI2C_TRANSMIT_MODE);
+	/*eI2C_setMode(__MSP430_BASEADDRESS_EUSCI_B0__, eI2C_TRANSMIT_MODE);
 	eI2C_enable(__MSP430_BASEADDRESS_EUSCI_B0__);
 	eI2C_masterSendSingleByte(__MSP430_BASEADDRESS_EUSCI_B0__, 0);
 	while (eI2C_isBusBusy(__MSP430_BASEADDRESS_EUSCI_B0__)) ;
@@ -285,10 +285,11 @@ void initLight(){
 	//i2c_writeByte(0);
 	//i2c_writeByte(0b10100000);
 	//i2c_writeByte(1);
-	//i2c_writeByte(0b00000011);
+	//i2c_writeByte(0b00000011);*/
 }
 
 int getLight(){
+	/*
 	eI2C_setMode(__MSP430_BASEADDRESS_EUSCI_B0__,
 		eI2C_TRANSMIT_MODE
 		);
@@ -300,8 +301,8 @@ int getLight(){
 		eI2C_disable(__MSP430_BASEADDRESS_EUSCI_B0__);
 		eI2C_masterReceive(__MSP430_BASEADDRESS_EUSCI_B0__);
 	//i2c_writeByte(3);
-	//int l = readData();
-	//return l;
+	//int l = readData();*/
+	return 1;
 }
 
 int main(void)
@@ -317,16 +318,18 @@ int main(void)
     init_UART();							// Initialize serial port
     i2c_init();								// Init I2C for communicating with the sensor board
     initLight();
+    i2c_writeByte(0b11100101);
 
     __enable_interrupt();
+
 
     for ( ;; ) {
 
     	//LPM0;
 
-    	int light = (int)getLight();
+    	int temp = (int)getTemperature();
     	send_str("Light: ");
-    	send_int(light, 10);
+    	send_int(temp, 10);
     	//send_str(" Celsius");
     	new_line();
 
