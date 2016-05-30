@@ -5,9 +5,11 @@
 //
 // ------------------------------------------------------------------------------------
 
-//#include "driverlib.h"
-#include "../msp430_driverlib_2_60_00_02/driverlib/MSP430FR5xx_6xx/driverlib.h"
+#include "driverlib.h"
+//#include "../msp430_driverlib_2_60_00_02/driverlib/MSP430FR5xx_6xx/driverlib.h"
 #include "stdint.h"
+#include <string.h>
+#include <stdlib.h>
 
 
 // ------------------------------------------------------------------------------
@@ -18,17 +20,52 @@
 #define UART_TX_DONE		(UCA0IFG & UCTXCPTIFG)
 #define UART_RESET_TX_DONE	(UCA0IFG &= ~UCTXCPTIFG)
 
+// sensor addresses and registers
+#define LIGHT_SENSOR_ADDRESS 0b1000100u
+#define CMD_GET_LIGHT_LSB 0x02u
+#define CMD_GET_LIGHT_MSB 0x03u
+
+#define HUMIDITY_SENSOR_ADDRESS 0b1000000u
+#define CMD_GET_HUMIDITY 0b11100101u
+#define CMD_GET_TEMP_SENSIRION 0b11100011u
+
+#define PRESSURE_SENSOR_ADDRESS 0b1110111u
+#define CMD_GET_PRESSURE 0x74u
+#define CMD_READ_PRESSURE_MSB 0xF6u
+#define CMD_READ_PRESSURE_LSB 0xF7u
+
 //Function Prototypes
 static void send_char(char);
 static void send_str(char*);
 static void send_int(int, int);
 static void new_line();
+void update();
+
+
+//because leds are not linear when dimmed with pwm
+uint8_t pwm[] = {0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01,
+		0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x02, 0x02, 0x02, 0x02, 0x02, 0x02, 0x02,
+		0x02, 0x02, 0x03, 0x03, 0x03, 0x03, 0x03, 0x03, 0x04, 0x04, 0x04, 0x04, 0x04, 0x05, 0x05, 0x05,
+		0x05, 0x06, 0x06, 0x06, 0x07, 0x07, 0x07, 0x08, 0x08, 0x08, 0x09, 0x09, 0x0A, 0x0A, 0x0B, 0x0B,
+		0x0C, 0x0C, 0x0D, 0x0D, 0x0E, 0x0F, 0x0F, 0x10, 0x11, 0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17,
+		0x18, 0x19, 0x1A, 0x1B, 0x1C, 0x1D, 0x1F, 0x20, 0x21, 0x23, 0x24, 0x26, 0x27, 0x29, 0x2B, 0x2C,
+		0x2E, 0x30, 0x32, 0x34, 0x36, 0x38, 0x3A, 0x3C, 0x3E, 0x40, 0x43, 0x45, 0x47, 0x4A, 0x4C, 0x4F,
+		0x51, 0x54, 0x57, 0x59, 0x5C, 0x5F, 0x62, 0x64, 0x67, 0x6A, 0x6D, 0x70, 0x73, 0x76, 0x79, 0x7C,
+		0x7F, 0x82, 0x85, 0x88, 0x8B, 0x8E, 0x91, 0x94, 0x97, 0x9A, 0x9C, 0x9F, 0xA2, 0xA5, 0xA7, 0xAA,
+		0xAD, 0xAF, 0xB2, 0xB4, 0xB7, 0xB9, 0xBB, 0xBE, 0xC0, 0xC2, 0xC4, 0xC6, 0xC8, 0xCA, 0xCC, 0xCE,
+		0xD0, 0xD2, 0xD3, 0xD5, 0xD7, 0xD8, 0xDA, 0xDB, 0xDD, 0xDE, 0xDF, 0xE1, 0xE2, 0xE3, 0xE4, 0xE5,
+		0xE6, 0xE7, 0xE8, 0xE9, 0xEA, 0xEB, 0xEC, 0xED, 0xED, 0xEE, 0xEF, 0xEF, 0xF0, 0xF1, 0xF1, 0xF2,
+		0xF2, 0xF3, 0xF3, 0xF4, 0xF4, 0xF5, 0xF5, 0xF6, 0xF6, 0xF6, 0xF7, 0xF7, 0xF7, 0xF8, 0xF8, 0xF8,
+		0xF9, 0xF9, 0xF9, 0xF9, 0xFA, 0xFA, 0xFA, 0xFA, 0xFA, 0xFB, 0xFB, 0xFB, 0xFB, 0xFB, 0xFB, 0xFC,
+		0xFC, 0xFC, 0xFC, 0xFC, 0xFC, 0xFC, 0xFC, 0xFC, 0xFD, 0xFD, 0xFD, 0xFD, 0xFD, 0xFD, 0xFD, 0xFD,
+		0xFD, 0xFD, 0xFD, 0xFD, 0xFD, 0xFD, 0xFD, 0xFE, 0xFE, 0xFE, 0xFE, 0xFE, 0xFE, 0xFE, 0xFF, 0xFF};
 
 // -----------------------------------------------------------------------------
 // initialization functions
 // -----------------------------------------------------------------------------
 void init_gpio(void)
 {
+
     // ---------------------------------------------------------------------
     // Initializing GPIOs
     // ---------------------------------------------------------------------
@@ -37,7 +74,119 @@ void init_gpio(void)
     // 2.1 : RX
     P2SEL1 |= (BIT0 | BIT1);
     P2SEL0 &= ~(BIT0 | BIT1);
+    //GPIO for LED (for pwm )
+    //1.4: R
+    //1.5: G
+    //3.4: B
+    P1DIR |= BIT4;
+    P1DIR |= BIT5;
+    P3DIR |= BIT4;
+    P1SEL0 |= BIT4 | BIT5;
+    P3SEL0 |= BIT4;
 }
+
+void init_clock(void)
+{
+
+	CSCTL0_H = CSKEY >> 8;	// Unlock CS registers
+  	CSCTL1 = DCOFSEL_3 | DCORSEL;		// Set DCO to 8MHz
+  	CSCTL2 = SELA__LFXTCLK | SELS__DCOCLK | SELM__DCOCLK;	// Set SMCLK = MCLK = DCO
+  	CSCTL3 = DIVA__1 | DIVS__1 | DIVM__1;	// Set all dividers to 1
+	/*
+    // -------------------------------------------------------------------
+    // Setting the clock
+    // We use the low frequency VLO oscillator, that works in LPM3 mode, to
+    //	source the timer.
+    // -------------------------------------------------------------------
+	CS_setDCOFreq(CS_DCORSEL_0, CS_DCOFSEL_0);	// DCO set to 1 MHz
+	CS_initClockSignal(CS_MCLK, CS_DCOCLK_SELECT, CS_CLOCK_DIVIDER_1);	//MCLK set to 1MHz
+	CS_initClockSignal(CS_SMCLK, CS_DCOCLK_SELECT, CS_CLOCK_DIVIDER_32);	//SMCLK set to 8MHz
+	CS_turnOnSMCLK();
+	*/
+}
+
+void init_UART(void)
+{
+    // ---------------------------------------------------------------------
+    // Initialization of the UART
+    // - No parity
+    // - LSB first
+    // - One stop bit
+    // - 8-bit data
+    // - UART mode (asynchronous)
+    // - ACLK clock is used
+    // - Erroneous characters rejected
+    // - No break characters interrupts
+    // - Not dormant
+    // - Software reset disabled
+    // - Baudrate: 9600 baud
+    // ---------------------------------------------------------------------
+    UCA0CTLW0 = UCSWRST;	// Reset
+    UCA0CTLW0 = UCSSEL__SMCLK;
+    // Setting the baudrate
+    UCA0BR0 = 52;
+    UCA0BR1 = 0x00;
+    UCA0MCTLW |= UCOS16 | UCBRF_1;
+    UCA0CTLW0 &= ~UCSWRST;	// Unreset
+    // Enabling interrupt on character reception
+    UCA0IE |= UCRXIE;
+}
+
+void init_timer() {
+	 // Configure Timer0_B
+	  TB0CCR0 = (255)-1;                         // PWM Period
+	  TB0CCTL1 = OUTMOD_7;                      // CCR1 reset/set
+	  //TB0CCTL1 |= CCIE; 	//Enable Interrupts on CCR1
+	  TB0CCR1 = 0;                            // CCR1 PWM duty cycle
+	  TB0CCTL2 = OUTMOD_7;                      // CCR2 reset/set
+	  //TB0CCTL2 |= CCIE; 	//Enable Interrupts on CCR1
+	  TB0CCR2 = 0;                            // CCR2 PWM duty cycle
+	  TB0CCTL3 = OUTMOD_7;
+	  //TB0CCTL3 |= CCIE; 	//Enable Interrupts on CCR1
+	  TB0CCR3 = 0;
+	  TB0CTL = TBSSEL__ACLK | MC__UP | TBCLR;  // SMCLK, up mode, clear TAR
+}
+
+void i2c_init(void)
+{
+	  // Configure USCI_B0 for I2C mode
+
+	  P1SEL1 |= BIT6 | BIT7;                    // I2C pins
+
+	  UCB0CTLW0 |= UCSWRST;                     // Software reset enabled
+	  UCB0CTLW0 |= UCMODE_3 | UCMST | UCSYNC;   // I2C mode, Master mode, sync
+
+	  UCB0BRW = 24;                         // baudrate = SMCLK / 8
+	  //UCB0I2CSA = TEMP_SENSOR_ADDRESS;               // Slave address
+	  UCB0TBCNT = 0x0003;                       // number of bytes to be received	//TODO
+	  UCB0CTL1 &= ~UCSWRST;
+
+	  UCB0IE |= UCNACKIE;             // transmit and NACK interrupt enable
+
+}
+
+void init_RTC() {
+
+	RTCCTL01 = RTCTEVIE | RTCRDYIE | RTCBCD | RTCHOLD;
+	                                            // RTC enable, BCD mode, RTC hold
+	                                            // enable RTC read ready interrupt
+	                                            // enable RTC time event interrupt
+
+	RTCYEAR = 0x2010;                       // Year = 0x2010
+	RTCMON = 0x4;                           // Month = 0x04 = April
+	RTCDAY = 0x05;                          // Day = 0x05 = 5th
+	RTCDOW = 0x01;                          // Day of week = 0x01 = Monday
+	RTCHOUR = 0x10;                         // Hour = 0x10
+	RTCMIN = 0x32;                          // Minute = 0x32
+	RTCSEC = 0x45;                          // Seconds = 0x45
+    RTCADOWDAY = 0x2;                       // RTC Day of week alarm = 0x2
+    RTCADAY = 0x20;                         // RTC Day Alarm = 0x20
+    RTCAHOUR = 0x10;                        // RTC Hour Alarm
+    RTCAMIN = 0x23;                         // RTC Minute Alarm
+
+    RTCCTL01 &= ~(RTCHOLD);                 // Start RTC
+}
+
 
 // -------------------------------------------------------------------------
 // UART interrupt handler
@@ -108,67 +257,7 @@ static void new_line()
 	send_char(0xD);
 }
 
-void init_clock(void)
-{
-
-	CSCTL0_H = CSKEY >> 8;	// Unlock CS registers
-  	CSCTL1 = DCOFSEL_3 | DCORSEL;		// Set DCO to 8MHz
-  	CSCTL2 = SELA__LFXTCLK | SELS__DCOCLK | SELM__DCOCLK;	// Set SMCLK = MCLK = DCO
-  	CSCTL3 = DIVA__1 | DIVS__1 | DIVM__1;	// Set all dividers to 1
-	/*
-    // -------------------------------------------------------------------
-    // Setting the clock
-    // We use the low frequency VLO oscillator, that works in LPM3 mode, to
-    //	source the timer.
-    // -------------------------------------------------------------------
-	CS_setDCOFreq(CS_DCORSEL_0, CS_DCOFSEL_0);	// DCO set to 1 MHz
-	CS_initClockSignal(CS_MCLK, CS_DCOCLK_SELECT, CS_CLOCK_DIVIDER_1);	//MCLK set to 1MHz
-	CS_initClockSignal(CS_SMCLK, CS_DCOCLK_SELECT, CS_CLOCK_DIVIDER_32);	//SMCLK set to 8MHz
-	CS_turnOnSMCLK();
-	*/
-}
-
-void init_UART(void)
-{
-    // ---------------------------------------------------------------------
-    // Initialization of the UART
-    // - No parity
-    // - LSB first
-    // - One stop bit
-    // - 8-bit data
-    // - UART mode (asynchronous)
-    // - ACLK clock is used
-    // - Erroneous characters rejected
-    // - No break characters interrupts
-    // - Not dormant
-    // - Software reset disabled
-    // - Baudrate: 9600 baud
-    // ---------------------------------------------------------------------
-    UCA0CTLW0 = UCSWRST;	// Reset
-    UCA0CTLW0 = UCSSEL__SMCLK;
-    // Setting the baudrate
-    UCA0BR0 = 52;
-    UCA0BR1 = 0x00;
-    UCA0MCTLW |= UCOS16 | UCBRF_1;
-    UCA0CTLW0 &= ~UCSWRST;	// Unreset
-    // Enabling interrupt on character reception
-    UCA0IE |= UCRXIE;
-}
-
-
-#define LIGHT_SENSOR_ADDRESS 0b1000100u
-#define CMD_GET_LIGHT_LSB 0x02u
-#define CMD_GET_LIGHT_MSB 0x03u
-
-#define HUMIDITY_SENSOR_ADDRESS 0b1000000u
-#define CMD_GET_HUMIDITY 0b11100101u
-#define CMD_GET_TEMP_SENSIRION 0b11100011u
-
-#define PRESSURE_SENSOR_ADDRESS 0b1110111u
-#define CMD_GET_PRESSURE 0x74u
-#define CMD_READ_PRESSURE_MSB 0xF6u
-#define CMD_READ_PRESSURE_LSB 0xF7u
-
+// interrupt handler for i2c
 #if defined(__TI_COMPILER_VERSION__) || defined(__IAR_SYSTEMS_ICC__)
 #pragma vector = USCI_B0_VECTOR
 __interrupt void USCI_B0_ISR(void)
@@ -203,22 +292,63 @@ void __attribute__ ((interrupt(USCI_B0_VECTOR))) USCI_B0_ISR (void)
   }
 }
 
-void i2c_init(void)
+
+// -------------------------------------------------------------------------
+// RTC interrupt handler
+// -------------------------------------------------------------------------
+
+//Interrupt handler for the RTC
+#pragma vector=RTC_VECTOR
+__interrupt void RTC_B_ISR(void)
 {
-	  // Configure USCI_B0 for I2C mode
+    switch(__even_in_range(RTCIV,16))
+    {
+    case 0: break;      //No interrupts
+    case 2:             //RTCRDYIFG (This interrupt happens every second.)
+        update();
+        break;
+    default: break;
+    }
+}
 
-	  P1SEL1 |= BIT6 | BIT7;                    // I2C pins
+/*// interrupt handler for timer
+#pragma vector=TIMER0_B1_VECTOR
+__interrupt void Timer_B1(void)
+{
+	switch( TB0IV )
+	{
+		case 2: //CCR1
+			//send_str("AT CCR0 INTERRUPT");
+			P1OUT ^= BIT3;
+			//TB0CCR1 += ledColor[0]; // Add offset to CCR1
+			break;
+		case 4: // CCR2
+			P1OUT ^= BIT4;
+			//TB0CCR2 += ledColor[1]; // Add offset to CCR2
+			break;
+		case 8: // CCR3
+			P1OUT ^= BIT5;
+			//TB0CCR3 += ledColor[2]; // Add offset to CCR3
+		case 10:
+			P1OUT ^= BIT3;
+			P1OUT ^= BIT4;
+			P1OUT ^= BIT5;
+			break; // overflow not used
+	}
+}
 
-	  UCB0CTLW0 |= UCSWRST;                     // Software reset enabled
-	  UCB0CTLW0 |= UCMODE_3 | UCMST | UCSYNC;   // I2C mode, Master mode, sync
+#pragma vector=TIMER0_B0_VECTOR
+__interrupt void Timer_B0(void)
+{
 
-	  UCB0BRW = 24;                         // baudrate = SMCLK / 8
-	  //UCB0I2CSA = TEMP_SENSOR_ADDRESS;               // Slave address
-	  UCB0TBCNT = 0x0003;                       // number of bytes to be received	//TODO
-	  UCB0CTL1 &= ~UCSWRST;
+}*/
 
-	  UCB0IE |= UCNACKIE;             // transmit and NACK interrupt enable
 
+
+void setRGB(int r, int g, int b){
+	TB0CCR1 = (int)pwm[r];
+	TB0CCR2 = (int)pwm[g];
+	TB0CCR3 = (int)pwm[b];
 }
 
 void i2c_writeByte(uint8_t data)
@@ -276,8 +406,9 @@ int getTemperature() {
 	i2c_writeByte(CMD_GET_TEMP_SENSIRION);
 	unsigned int t = readData();
 	t &= ~0b11; //last 2 bits are status bits, not data
-	t = 100*(-46.85+175.72*((double)t/65536.0));
-	return t;
+	int temp = 0;
+	temp = 100*(-46.85+175.72*((double)t/65536.0));
+	return temp;
 }
 
 unsigned int getLight(){
@@ -317,7 +448,7 @@ int getHumidity() {
 	i2c_writeByte(CMD_GET_HUMIDITY);
 	unsigned int rh = readData();
 	rh &= ~0b11;  //because last 2 bits are status bits, not data
-	rh = -6 + 125 * ((double)rh/65536.0);
+	rh = 100*(-6 + 125 * ((double)rh/65536.0));
 	return rh;
 }
 
@@ -332,6 +463,57 @@ int getPressure() {
 	return lsb | (msb << 8);
 }
 
+void update(){
+	unsigned int rh = (int)getHumidity();
+	int temp = (int)getTemperature();
+	//int pressure = (int)getPressure();
+	unsigned int light = (int)getLight();
+	int intTemp = temp / 100;
+
+	switch(intTemp) {
+		case -20 ... 0:
+			setRGB(0, (intTemp + 20)*12.75, 255);
+			break;
+		case 1 ... 15:
+			setRGB(intTemp * 17, 255, 255);
+			break;
+		case 16 ... 25:
+			setRGB(255, 255, 255 - (intTemp - 15) * 25.5);
+			break;
+		case 26 ... 40:
+			setRGB(255, 255 - (intTemp - 25) * 17, 0);
+			break;
+	}
+
+	send_str("temp: ");
+	send_int(temp/100, 10);
+	send_str(".");
+	send_int(temp%100, 10);
+	send_str(" Celsius");
+	new_line();
+	send_str("humidity: ");
+	send_int(rh/100, 10);
+	send_char('.');
+	send_int(rh%100, 10);
+	send_char('%');
+	new_line();
+	send_str("light: ");
+	send_int(light, 10);
+	new_line();
+
+	/*//csv data format for plotting
+	send_int(temp/100, 10);
+	send_char('.');
+	send_int(temp%100, 10);
+	send_char(',');
+	send_int(rh, 10);
+	send_char(',');
+	send_int(light, 10);
+	send_char(',');
+	send_int(pressure, 10);
+	new_line();*/
+}
+
 int main(void)
 {
     WDTCTL = WDTPW | WDTHOLD;               // Stop watchdog timer
@@ -344,47 +526,20 @@ int main(void)
     init_clock();							// Initialize clocks
     init_UART();							// Initialize serial port
     i2c_init();								// Init I2C for communicating with the sensor board
-
-
+    init_timer();							// init timer for PWM control of the RGB LED
+    init_RTC();
+    int i = 0;
+    for (i = 0; i < 256; i ++){
+       	setRGB(i, i, i);
+       	__delay_cycles(400000);
+    }
     __enable_interrupt();
     send_str("INITIALIZED");
     new_line();
 
     for ( ;; ) {
 
-    	//LPM0;
-    	unsigned int rh = (int)getHumidity();
-    	int temp = (int)getTemperature();
-    	int pressure = (int)getPressure();
-    	unsigned int light = (int)getLight();
-    	send_str("temp: ");
-    	send_int(temp/100, 10);
-    	send_str(".");
-    	send_int(temp%100, 10);
-    	send_str(" Celsius");
-    	new_line();
-    	send_str("humidity: ");
-    	send_int(rh, 10);
-    	new_line();
-    	send_str("light: ");
-    	send_int(light, 10);
-    	new_line();
-    	send_str("Pressure: ");
-    	send_int(pressure, 10);
-    	new_line();
-
-    	//csv data format for plotting
-    	/*send_int(temp/100, 10);
-    	send_char('.');
-    	send_int(temp%100, 10);
-    	send_char(',');
-    	send_int(rh, 10);
-    	send_char(',');
-    	send_int(light, 10);
-    	send_char(',');
-    	send_int(pressure, 10);
-    	new_line();*/
-
-    	   __delay_cycles(4000000);
+    	__bis_SR_register(LPM3_bits | GIE);             // Enter LPM3, interrupts enabled
+    	 __no_operation();                         // For debugger
     }
 }
