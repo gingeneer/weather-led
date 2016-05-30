@@ -155,11 +155,19 @@ void init_UART(void)
     UCA0IE |= UCRXIE;
 }
 
-#define TEMP_SENSOR_ADDRESS 0x41u
-#define CMD_GET_TEMPERATURE 0x01u	//register of converted temperature
 
-#define LIGHT_SENSOR_ADDRESS 0b1000100
-#define CMD_GET_LIGHT //TODO
+#define LIGHT_SENSOR_ADDRESS 0b1000100u
+#define CMD_GET_LIGHT_LSB 0x02u
+#define CMD_GET_LIGHT_MSB 0x03u
+
+#define HUMIDITY_SENSOR_ADDRESS 0b1000000u
+#define CMD_GET_HUMIDITY 0b11100101u
+#define CMD_GET_TEMP_SENSIRION 0b11100011u
+
+#define PRESSURE_SENSOR_ADDRESS 0b1110111u
+#define CMD_GET_PRESSURE 0x74u
+#define CMD_READ_PRESSURE_MSB 0xF6u
+#define CMD_READ_PRESSURE_LSB 0xF7u
 
 #if defined(__TI_COMPILER_VERSION__) || defined(__IAR_SYSTEMS_ICC__)
 #pragma vector = USCI_B0_VECTOR
@@ -205,8 +213,8 @@ void i2c_init(void)
 	  UCB0CTLW0 |= UCMODE_3 | UCMST | UCSYNC;   // I2C mode, Master mode, sync
 
 	  UCB0BRW = 24;                         // baudrate = SMCLK / 8
-	  UCB0I2CSA = TEMP_SENSOR_ADDRESS;               // Slave address
-	  UCB0TBCNT = 0x0002;                       // number of bytes to be received	//TODO
+	  //UCB0I2CSA = TEMP_SENSOR_ADDRESS;               // Slave address
+	  UCB0TBCNT = 0x0003;                       // number of bytes to be received	//TODO
 	  UCB0CTL1 &= ~UCSWRST;
 
 	  UCB0IE |= UCNACKIE;             // transmit and NACK interrupt enable
@@ -236,19 +244,18 @@ void i2c_writeByte(uint8_t data)
 	UCB0IFG &= ~UCTXIFG0;
 }
 
-int readData() {
+unsigned int readData() {
 
-	int t = 0;
+	unsigned int t = 0;
 
 	UCB0CTLW0 &= ~UCTR;			// Receive mode
 	UCB0CTL1 |= UCTXSTT;  // I2C start condition
 
 	while(!(UCB0IFG & UCRXIFG));
-	t |= UCB0RXBUF << 8;				//read low byte
+	t |= UCB0RXBUF;				//read low byte
 
 	while(!(UCB0IFG & UCRXIFG));
-	t |= UCB0RXBUF;			//read high byte
-
+	t |= UCB0RXBUF<<8;			//read high byte
 	// Send stop condition
 	UCB0CTLW0 |= UCTXSTP;
 
@@ -257,52 +264,72 @@ int readData() {
 
 int getTemperature() {
 
+	/*UCB0I2CSA = TEMP_SENSOR_ADDRESS;
 
 	i2c_writeByte(CMD_GET_TEMPERATURE);
 
 	int t = readData();
-	//t = (t >> 2)/32;
+	t = (t >> 2)/32;
 	//t = -46.85 + 175.72 * (t/65536);
+	return t;*/
+	UCB0I2CSA = HUMIDITY_SENSOR_ADDRESS;
+	i2c_writeByte(CMD_GET_TEMP_SENSIRION);
+	unsigned int t = readData();
+	t &= ~0b11; //last 2 bits are status bits, not data
+	t = 100*(-46.85+175.72*((double)t/65536.0));
 	return t;
 }
 
-void initLight(){
-	/*eI2C_setMode(__MSP430_BASEADDRESS_EUSCI_B0__, eI2C_TRANSMIT_MODE);
-	eI2C_enable(__MSP430_BASEADDRESS_EUSCI_B0__);
-	eI2C_masterSendSingleByte(__MSP430_BASEADDRESS_EUSCI_B0__, 0);
-	while (eI2C_isBusBusy(__MSP430_BASEADDRESS_EUSCI_B0__)) ;
-	__delay_cycles(50);
-	eI2C_masterSendSingleByte(__MSP430_BASEADDRESS_EUSCI_B0__, 0b10100000);
-	while (eI2C_isBusBusy(__MSP430_BASEADDRESS_EUSCI_B0__)) ;
-	__delay_cycles(50);
-	eI2C_masterSendSingleByte(__MSP430_BASEADDRESS_EUSCI_B0__, 1);
-	while (eI2C_isBusBusy(__MSP430_BASEADDRESS_EUSCI_B0__)) ;
-	__delay_cycles(50);
-	eI2C_masterSendSingleByte(__MSP430_BASEADDRESS_EUSCI_B0__, 0b00000011);
-	while (eI2C_isBusBusy(__MSP430_BASEADDRESS_EUSCI_B0__)) ;
-		__delay_cycles(50);
-	eI2C_disable(__MSP430_BASEADDRESS_EUSCI_B0__);
-	//i2c_writeByte(0);
-	//i2c_writeByte(0b10100000);
-	//i2c_writeByte(1);
-	//i2c_writeByte(0b00000011);*/
+unsigned int getLight(){
+	send_str("LIGHT START: ");
+	UCB0I2CSA = LIGHT_SENSOR_ADDRESS;
+
+	i2c_writeByte(CMD_GET_LIGHT_LSB);
+	unsigned int l = 0;
+	UCB0CTLW0 &= ~UCTR;			// Receive mode
+	UCB0CTL1 |= UCTXSTT;  // I2C start condition
+	while(!(UCB0IFG & UCRXIFG));
+	l |= UCB0RXBUF;				//read low byte
+	while(!(UCB0IFG & UCRXIFG));
+		l |= UCB0RXBUF<<8;
+	UCB0CTLW0 |= UCTXSTP;
+
+	unsigned int l2 = 0;
+	i2c_writeByte(CMD_GET_LIGHT_MSB);
+	UCB0CTLW0 &= ~UCTR;			// Receive mode
+	UCB0CTL1 |= UCTXSTT;  // I2C start condition
+	while(!(UCB0IFG & UCRXIFG));
+	l2 |= UCB0RXBUF;				//read low byte
+	while(!(UCB0IFG & UCRXIFG));
+		l2 |= UCB0RXBUF<<8;
+	UCB0CTLW0 |= UCTXSTP;
+
+	send_int(l, 10);
+	new_line();
+	send_int(l2, 10);
+	new_line();
+	l = l | (l2<<8);
+	return l;
 }
 
-int getLight(){
-	/*
-	eI2C_setMode(__MSP430_BASEADDRESS_EUSCI_B0__,
-		eI2C_TRANSMIT_MODE
-		);
+int getHumidity() {
+	UCB0I2CSA = HUMIDITY_SENSOR_ADDRESS;
+	i2c_writeByte(CMD_GET_HUMIDITY);
+	unsigned int rh = readData();
+	rh &= ~0b11;  //because last 2 bits are status bits, not data
+	rh = -6 + 125 * ((double)rh/65536.0);
+	return rh;
+}
 
-	eI2C_enable(__MSP430_BASEADDRESS_EUSCI_B0__);
-		eI2C_masterSendSingleByte(__MSP430_BASEADDRESS_EUSCI_B0__, 3);
-		while (eI2C_isBusBusy(__MSP430_BASEADDRESS_EUSCI_B0__)) ;
-		__delay_cycles(50);
-		eI2C_disable(__MSP430_BASEADDRESS_EUSCI_B0__);
-		eI2C_masterReceive(__MSP430_BASEADDRESS_EUSCI_B0__);
-	//i2c_writeByte(3);
-	//int l = readData();*/
-	return 1;
+int getPressure() {
+	UCB0I2CSA = PRESSURE_SENSOR_ADDRESS;
+	i2c_writeByte(CMD_GET_PRESSURE);
+	__delay_cycles(64000);
+	i2c_writeByte(CMD_READ_PRESSURE_MSB);
+	unsigned int msb = readData();
+	i2c_writeByte(CMD_READ_PRESSURE_LSB);
+	unsigned int lsb = readData();
+	return lsb | (msb << 8);
 }
 
 int main(void)
@@ -317,21 +344,46 @@ int main(void)
     init_clock();							// Initialize clocks
     init_UART();							// Initialize serial port
     i2c_init();								// Init I2C for communicating with the sensor board
-    initLight();
-    i2c_writeByte(0b11100101);
+
 
     __enable_interrupt();
-
+    send_str("INITIALIZED");
+    new_line();
 
     for ( ;; ) {
 
     	//LPM0;
-
+    	unsigned int rh = (int)getHumidity();
     	int temp = (int)getTemperature();
-    	send_str("Light: ");
-    	send_int(temp, 10);
-    	//send_str(" Celsius");
+    	int pressure = (int)getPressure();
+    	unsigned int light = (int)getLight();
+    	send_str("temp: ");
+    	send_int(temp/100, 10);
+    	send_str(".");
+    	send_int(temp%100, 10);
+    	send_str(" Celsius");
     	new_line();
+    	send_str("humidity: ");
+    	send_int(rh, 10);
+    	new_line();
+    	send_str("light: ");
+    	send_int(light, 10);
+    	new_line();
+    	send_str("Pressure: ");
+    	send_int(pressure, 10);
+    	new_line();
+
+    	//csv data format for plotting
+    	/*send_int(temp/100, 10);
+    	send_char('.');
+    	send_int(temp%100, 10);
+    	send_char(',');
+    	send_int(rh, 10);
+    	send_char(',');
+    	send_int(light, 10);
+    	send_char(',');
+    	send_int(pressure, 10);
+    	new_line();*/
 
     	   __delay_cycles(4000000);
     }
