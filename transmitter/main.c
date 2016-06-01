@@ -330,8 +330,8 @@ __interrupt void RTC_B_ISR(void)
 __interrupt void sw2_interrupt_handler (void) {
 	displayState++;
 	displayState %= 3;
-	send_int(displayState, 10);
-	new_line();
+	//send_int(displayState, 10);
+	//new_line();
 	update();
 	__delay_cycles(64000);			//debouncing
    while (! (P1IN & BIT1));       //Wait for the release of the button
@@ -505,7 +505,7 @@ void update(){
 		}
 	}
 	else if(displayState == 2) {
-		setRGB(255, 255, 255);
+		setRGB(0, 0, 0);
 	}
 
 	/*send_str("temp: ");
@@ -560,6 +560,7 @@ int main(void)
        	setRGB(i, i, i);
        	__delay_cycles(400000);
     }*/
+    setRGB(0,0,0);
     __enable_interrupt();
     send_str("INITIALIZED");
     new_line();
