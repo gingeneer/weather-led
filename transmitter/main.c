@@ -5,11 +5,13 @@
 //
 // ------------------------------------------------------------------------------------
 
-#include "driverlib.h"
+//#include "driverlib.h"
 //#include "../msp430_driverlib_2_60_00_02/driverlib/MSP430FR5xx_6xx/driverlib.h"
 #include "stdint.h"
-#include <string.h>
-#include <stdlib.h>
+//#include <string.h>
+//#include <stdlib.h>
+#include <msp430.h>
+
 
 
 // ------------------------------------------------------------------------------
@@ -40,6 +42,8 @@ static void send_str(char*);
 static void send_int(int, int);
 static void new_line();
 void update();
+
+uint8_t displayState = 0;
 
 
 //because leds are not linear when dimmed with pwm
@@ -83,6 +87,13 @@ void init_gpio(void)
     P3DIR |= BIT4;
     P1SEL0 |= BIT4 | BIT5;
     P3SEL0 |= BIT4;
+    //s2 on P1.1
+    P1DIR &= ~BIT1;		// Input direction
+    P1REN |= BIT1;		// Enabling pull-up/down
+    P1OUT |= BIT1;		// Pull-up
+    P1IES &= ~BIT1;		// Interrupt edge select: high-to-low
+    P1IE |= BIT1;		// Enabling interrupt for this port
+    P1IFG &= ~BIT1;      // Clean P1.1 Interrupt Flag
 }
 
 void init_clock(void)
@@ -158,7 +169,7 @@ void i2c_init(void)
 
 	  UCB0BRW = 24;                         // baudrate = SMCLK / 8
 	  //UCB0I2CSA = TEMP_SENSOR_ADDRESS;               // Slave address
-	  UCB0TBCNT = 0x0003;                       // number of bytes to be received	//TODO
+	  UCB0TBCNT = 0x0002;                       // number of bytes to be received
 	  UCB0CTL1 &= ~UCSWRST;
 
 	  UCB0IE |= UCNACKIE;             // transmit and NACK interrupt enable
@@ -311,38 +322,25 @@ __interrupt void RTC_B_ISR(void)
     }
 }
 
-/*// interrupt handler for timer
-#pragma vector=TIMER0_B1_VECTOR
-__interrupt void Timer_B1(void)
-{
-	switch( TB0IV )
-	{
-		case 2: //CCR1
-			//send_str("AT CCR0 INTERRUPT");
-			P1OUT ^= BIT3;
-			//TB0CCR1 += ledColor[0]; // Add offset to CCR1
-			break;
-		case 4: // CCR2
-			P1OUT ^= BIT4;
-			//TB0CCR2 += ledColor[1]; // Add offset to CCR2
-			break;
-		case 8: // CCR3
-			P1OUT ^= BIT5;
-			//TB0CCR3 += ledColor[2]; // Add offset to CCR3
-		case 10:
-			P1OUT ^= BIT3;
-			P1OUT ^= BIT4;
-			P1OUT ^= BIT5;
-			break; // overflow not used
-	}
+/*
+ * interrupt handler for switch
+ */
+
+#pragma vector=PORT1_VECTOR
+__interrupt void sw2_interrupt_handler (void) {
+	displayState++;
+	displayState %= 3;
+	send_int(displayState, 10);
+	new_line();
+	update();
+	__delay_cycles(64000);			//debouncing
+   while (! (P1IN & BIT1));       //Wait for the release of the button
+   __delay_cycles(64000);			//debouncing
+
+
+   // Reseting the interrupt flag
+   P1IFG &= ~BIT1;                //Clean P1.1 Interrupt Flag
 }
-
-#pragma vector=TIMER0_B0_VECTOR
-__interrupt void Timer_B0(void)
-{
-
-}*/
-
 
 
 void setRGB(int r, int g, int b){
@@ -380,7 +378,6 @@ unsigned int readData() {
 
 	UCB0CTLW0 &= ~UCTR;			// Receive mode
 	UCB0CTL1 |= UCTXSTT;  // I2C start condition
-
 	while(!(UCB0IFG & UCRXIFG));
 	t |= UCB0RXBUF;				//read low byte
 
@@ -412,35 +409,43 @@ int getTemperature() {
 }
 
 unsigned int getLight(){
-	send_str("LIGHT START: ");
+	//send_str("LIGHT START: ");
 	UCB0I2CSA = LIGHT_SENSOR_ADDRESS;
 
-	i2c_writeByte(CMD_GET_LIGHT_LSB);
+	//i2c_writeByte(0x0);
+	//i2c_writeByte(0b10100001);
+
+	i2c_writeByte(0x03);
+	int l = readData();
+
+	return l;
+
+	/*i2c_writeByte(CMD_GET_LIGHT_MSB);
 	unsigned int l = 0;
 	UCB0CTLW0 &= ~UCTR;			// Receive mode
 	UCB0CTL1 |= UCTXSTT;  // I2C start condition
 	while(!(UCB0IFG & UCRXIFG));
 	l |= UCB0RXBUF;				//read low byte
 	while(!(UCB0IFG & UCRXIFG));
-		l |= UCB0RXBUF<<8;
+	l |= UCB0RXBUF<<8;
 	UCB0CTLW0 |= UCTXSTP;
 
 	unsigned int l2 = 0;
-	i2c_writeByte(CMD_GET_LIGHT_MSB);
+	i2c_writeByte(CMD_GET_LIGHT_LSB);
 	UCB0CTLW0 &= ~UCTR;			// Receive mode
 	UCB0CTL1 |= UCTXSTT;  // I2C start condition
 	while(!(UCB0IFG & UCRXIFG));
 	l2 |= UCB0RXBUF;				//read low byte
 	while(!(UCB0IFG & UCRXIFG));
-		l2 |= UCB0RXBUF<<8;
+	l2 |= UCB0RXBUF<<8;
 	UCB0CTLW0 |= UCTXSTP;
 
-	send_int(l, 10);
-	new_line();
-	send_int(l2, 10);
-	new_line();
+	//send_int(l, 10);
+	//new_line();
+	//send_int(l2, 10);
+	//new_line();
 	l = l | (l2<<8);
-	return l;
+	return l;*/
 }
 
 int getHumidity() {
@@ -454,38 +459,56 @@ int getHumidity() {
 
 int getPressure() {
 	UCB0I2CSA = PRESSURE_SENSOR_ADDRESS;
-	i2c_writeByte(CMD_GET_PRESSURE);
+	//i2c_writeByte(CMD_GET_PRESSURE);
+	i2c_writeByte(0xF4);
+	i2c_writeByte(0x34 + (1 << 6));
 	__delay_cycles(64000);
 	i2c_writeByte(CMD_READ_PRESSURE_MSB);
 	unsigned int msb = readData();
 	i2c_writeByte(CMD_READ_PRESSURE_LSB);
 	unsigned int lsb = readData();
-	return lsb | (msb << 8);
+	i2c_writeByte(0xF8);
+	unsigned int xlsb = readData();
+	return (msb << 16 + lsb << 8 + xlsb) >> (7);
 }
 
 void update(){
 	unsigned int rh = (int)getHumidity();
 	int temp = (int)getTemperature();
 	//int pressure = (int)getPressure();
-	unsigned int light = (int)getLight();
+	//unsigned int light = (int)getLight();
 	int intTemp = temp / 100;
-
-	switch(intTemp) {
-		case -20 ... 0:
-			setRGB(0, (intTemp + 20)*12.75, 255);
-			break;
-		case 1 ... 15:
-			setRGB(intTemp * 17, 255, 255);
-			break;
-		case 16 ... 25:
-			setRGB(255, 255, 255 - (intTemp - 15) * 25.5);
-			break;
-		case 26 ... 40:
-			setRGB(255, 255 - (intTemp - 25) * 17, 0);
-			break;
+	int intRh = rh / 100;
+	if(displayState == 0){
+		switch(intTemp) {
+			case -20 ... 0:
+				setRGB(0, (intTemp + 20)*12.75, 255);
+				break;
+			case 1 ... 15:
+				setRGB(intTemp * 17, 255, 255);
+				break;
+			case 16 ... 25:
+				setRGB(255, 255, 255 - (intTemp - 15) * 25.5);
+				break;
+			case 26 ... 40:
+				setRGB(255, 255 - (intTemp - 25) * 17, 0);
+				break;
+		}
+	}
+	else if(displayState == 1){
+		switch(intRh) {
+			case 0 ... 50:
+				setRGB(255, intRh * 5.1, 0);
+				break;
+			case 51 ... 100:
+				setRGB(255 - (intRh - 50) * 5.1, 255, 0);
+		}
+	}
+	else if(displayState == 2) {
+		setRGB(255, 255, 255);
 	}
 
-	send_str("temp: ");
+	/*send_str("temp: ");
 	send_int(temp/100, 10);
 	send_str(".");
 	send_int(temp%100, 10);
@@ -500,18 +523,22 @@ void update(){
 	send_str("light: ");
 	send_int(light, 10);
 	new_line();
-
-	/*//csv data format for plotting
+	//send_str("Pressusre: ");
+	//send_int(pressure,10);
+	//new_line();*/
+	//csv data format for plotting
 	send_int(temp/100, 10);
 	send_char('.');
 	send_int(temp%100, 10);
 	send_char(',');
-	send_int(rh, 10);
-	send_char(',');
+	send_int(rh/100, 10);
+	send_char('.');
+	send_int(rh%100, 10);
+	/*send_char(',');
 	send_int(light, 10);
 	send_char(',');
-	send_int(pressure, 10);
-	new_line();*/
+	send_int(pressure, 10);*/
+	new_line();
 }
 
 int main(void)
@@ -522,17 +549,17 @@ int main(void)
 
     init_gpio();							// Initialize GPIO
 
-                                            // to activate previously configured port settings
+                                              // to activate previously configured port settings
     init_clock();							// Initialize clocks
     init_UART();							// Initialize serial port
     i2c_init();								// Init I2C for communicating with the sensor board
     init_timer();							// init timer for PWM control of the RGB LED
     init_RTC();
-    int i = 0;
-    for (i = 0; i < 256; i ++){
+    //int i = 0;
+    /*for (i = 0; i < 256; i ++){
        	setRGB(i, i, i);
        	__delay_cycles(400000);
-    }
+    }*/
     __enable_interrupt();
     send_str("INITIALIZED");
     new_line();
